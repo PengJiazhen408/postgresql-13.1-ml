@@ -1,27 +1,37 @@
-PostgreSQL Database Management System
-=====================================
+# postgresql-13.1-ml
+Integration of CardEst Methods into PostgreSQL by HTTP Server
 
-This directory contains the source code distribution of the PostgreSQL
-database management system.
 
-PostgreSQL is an advanced object-relational database management system
-that supports an extended subset of the SQL standard, including
-transactions, foreign keys, subqueries, triggers, user-defined types
-and functions.  This distribution also contains C language bindings.
+## Compare with PG CE methods
+### Single Tabel
+- test database: imdb.title
+- Plan with PG CE methods:
 
-PostgreSQL has many language interfaces, many of which are listed here:
+```SQL
+imdb=# explain analyze select * from title where kind_id>1 and kind_id<10;
+                                                              QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on title  (cost=174.01..25746.20 rows=12642 width=306) (actual time=163.325..646.420 rows=1865487 loops=1)
+   Recheck Cond: ((kind_id > 1) AND (kind_id < 10))
+   Heap Blocks: exact=35995
+   ->  Bitmap Index Scan on kind_id_title  (cost=0.00..170.85 rows=12642 width=0) (actual time=156.207..156.208 rows=1865487 loops=1)
+         Index Cond: ((kind_id > 1) AND (kind_id < 10))
+ Planning Time: 1.313 ms
+ Execution Time: 710.562 ms
+(7 rows)
+```
 
-	https://www.postgresql.org/download/
+- Plan with learned CE methods:
 
-See the file INSTALL for instructions on how to build and install
-PostgreSQL.  That file also lists supported operating systems and
-hardware platforms and contains information regarding any other
-software packages that are required to build or run the PostgreSQL
-system.  Copyright and license information can be found in the
-file COPYRIGHT.  A comprehensive documentation set is included in this
-distribution; it can be read as described in the installation
-instructions.
+```SQL
+imdb=# explain analyze select * from title where kind_id>1 and kind_id<10;
+                                                    QUERY PLAN
+------------------------------------------------------------------------------------------------------------------
+ Seq Scan on title  (cost=0.00..73920.58 rows=1242940 width=94) (actual time=0.037..586.408 rows=1865487 loops=1)
+   Filter: ((kind_id > 1) AND (kind_id < 10))
+   Rows Removed by Filter: 662825
+ Planning Time: 32.463 ms
+ Execution Time: 656.291 ms
+(5 rows)
+```
 
-The latest version of this software may be obtained at
-https://www.postgresql.org/download/.  For more information look at our
-web site located at https://www.postgresql.org/.
