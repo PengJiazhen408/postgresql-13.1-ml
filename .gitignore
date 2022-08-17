@@ -1,3 +1,6 @@
+# user define
+cscope.*
+
 # Global excludes across all subdirectories
 *.o
 *.obj
