@@ -72,6 +72,7 @@ extern bool	enable_ml_cardest;
 extern bool	enable_ml_joinest;
 extern bool print_sub_queries;
 extern bool print_single_tbl_queries;
+extern bool query_fmt;
 extern int	ml_port;
 extern char *host;
 extern char	*page;

@@ -113,8 +113,9 @@
 /** modified  */
 bool		enable_ml_cardest = false;
 bool		enable_ml_joinest = false;
-bool        print_sub_queries = false;
+bool        print_sub_queries = true;
 bool        print_single_tbl_queries = true;
+bool		query_fmt = true;   // if true, fmt=common; else, fmt=vldbss
 int	    	ml_port = 8888;
 char		*host = "localhost";
 char		*page = "/cardinality";
@@ -194,218 +195,6 @@ static double relation_byte_size(double tuples, int width);
 static double page_size(double tuples, int width);
 static double get_parallel_divisor(Path *path);
 
-/** modified  */
-static void print_est_card(const char* func_name, double card);
-static void print_expr(const Node *expr, const List *rtable);
-
-
-static void
-print_relids(PlannerInfo *root, Relids relids)
-{
-	// int rti;
-	// for (rti = 1; rti < root->simple_rel_array_size; rti++)
-	// {
-	// 	RelOptInfo *rel = root->simple_rel_array[rti];
-	// 	char *rname = get_rel_name(rel->relid);
-	// 	printf("%s\n", rname);
-	// }
-    int			x;
-    bool		first = true;
-	char	    *rname;
-
-    x = -1;
-    while ((x = bms_next_member(relids, x)) >= 0)
-    {
-        if (!first)
-            printf(" ");
-        if (x < root->simple_rel_array_size &&
-            root->simple_rte_array[x]){
-				printf("%s", root->simple_rte_array[x]->eref->aliasname);
-				// printf("rel_namespace: %s\n", get_rel_namespace(16385));
-				// printf("rel_name: %s\n", get_rel_name(16385));
-				// rname = get_rel_name(root->simple_rte_array[x]->relid);
-			}
-            
-        else
-            printf("%d", x);
-        first = false;
-    }
-
-}
-
-static void
-print_restrictclauses(PlannerInfo *root, List *clauses)
-{
-    ListCell   *l;
-
-    foreach(l, clauses)
-    {
-        RestrictInfo *c = lfirst(l);
-
-        print_expr((Node *) c->clause, root->parse->rtable);
-        if (lnext(clauses, l))
-            printf(", ");
-    }
-}
-
-static void
-print_expr(const Node *expr, const List *rtable)
-{
-    if (expr == NULL)
-    {
-        printf("<>");
-        return;
-    }
-
-    if (IsA(expr, Var))
-    {
-        const Var  *var = (const Var *) expr;
-        char	*relname,
-                *attname;
-
-        switch (var->varno)
-        {
-            case INNER_VAR:
-                relname = "INNER";
-                attname = "?";
-                break;
-            case OUTER_VAR:
-                relname = "OUTER";
-                attname = "?";
-                break;
-            case INDEX_VAR:
-                relname = "INDEX";
-                attname = "?";
-                break;
-            default:
-            {
-                RangeTblEntry *rte;
-
-                Assert(var->varno > 0 &&
-                       (int) var->varno <= list_length(rtable));
-                rte = rt_fetch(var->varno, rtable);
-                relname = rte->eref->aliasname;
-                attname = get_rte_attribute_name(rte, var->varattno);
-            }
-                break;
-        }
-        printf("%s.%s", relname, attname);
-    }
-    else if (IsA(expr, Const))
-    {
-        const Const *c = (const Const *) expr;
-        Oid			typoutput;
-        bool		typIsVarlena;
-        char	   *outputstr;
-
-        if (c->constisnull)
-        {
-            printf("NULL");
-            return;
-        }
-
-        getTypeOutputInfo(c->consttype,
-                          &typoutput, &typIsVarlena);
-
-        outputstr = OidOutputFunctionCall(typoutput, c->constvalue);
-        printf("%s", outputstr);
-        pfree(outputstr);
-    }
-    else if (IsA(expr, OpExpr))
-    {
-        const OpExpr *e = (const OpExpr *) expr;
-        char	   *opname;
-
-        opname = get_opname(e->opno);
-        if (list_length(e->args) > 1)
-        {
-            print_expr(get_leftop((const Expr *) e), rtable);
-            printf(" %s ", ((opname != NULL) ? opname : "(invalid operator)"));
-            print_expr(get_rightop((const Expr *) e), rtable);
-        }
-        else
-        {
-            /* we print prefix and postfix ops the same... */
-            printf("%s ", ((opname != NULL) ? opname : "(invalid operator)"));
-            print_expr(get_leftop((const Expr *) e), rtable);
-        }
-    }
-    else if (IsA(expr, FuncExpr))
-    {
-        const FuncExpr *e = (const FuncExpr *) expr;
-        char	   *funcname;
-        ListCell   *l;
-
-        funcname = get_func_name(e->funcid);
-    	printf("%s(", ((funcname != NULL) ? funcname : "(invalid function)"));
-        foreach(l, e->args)
-        {
-            print_expr(lfirst(l), rtable);
-            if (lnext(e->args, l))
-                printf(",");
-        }
-        printf(")");
-    }
-    else
-        printf("unknown expr");
-}
-
-static void
-print_basic_rel(PlannerInfo *root, RelOptInfo *rel){
-	printf("RELOPTINFO (");
-    print_relids(root, rel->relids);
-    printf("): rows=%.0f width=%d\n", rel->rows, rel->reltarget->width);
-
-    if (rel->baserestrictinfo)
-    {
-        printf("\tbaserestrictinfo: ");
-        print_restrictclauses(root, rel->baserestrictinfo);
-        printf("\n");
-    }
-
-}
-
-static void
-print_est_card(const char* func_name, double card_est)
-{
-    // FILE *file = fopen("costsize.log", "a+");
-
-    time_t rawtime;
-    struct tm * timeinfo;
-    char time_buffer [128];
-
-    time (&rawtime);
-    timeinfo = localtime (&rawtime);
-    strftime (time_buffer,sizeof(time_buffer),"%Y/%m/%d %H:%M:%S",timeinfo);
-
-    printf("%s: pid[%d] in [%s]: %0.9f\n", time_buffer, getpid(), func_name, card_est);
-    // fclose(file);
-}
-
-static void
-print_single_rel(PlannerInfo *root, RelOptInfo *rel) {
-    // FILE* f_rec= fopen("single_tbl_est_record.txt", "a+");
-
-    print_basic_rel(root, rel);
-    printf("\n\n");
-    // fclose(f_rec);
-}
-
-static void
-print_join_rel(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2){
-    // FILE* f_rec= fopen("join_est_record_job.txt", "a+");
-
-    printf("==================inner_rel==================: \n");
-    print_basic_rel(root, rel1);
-    printf("==================outer_rel==================: \n");
-    print_basic_rel(root, rel2);
-
-    printf("\n\n");
-
-    // fclose(f_rec);
-}
-
-
 
 static void
 get_expr(const Node *expr, const List *rtable)
@@ -448,7 +237,13 @@ get_expr(const Node *expr, const List *rtable)
             }
                 break;
         }
-		strcat(sub_query, attname);
+		if (query_fmt){
+			strcat(sub_query, relname);
+			strcat(sub_query, ".");
+			strcat(sub_query, attname);
+		}
+		else
+			strcat(sub_query, attname);
         // printf("%s.%s", relname, attname);
     }
     else if (IsA(expr, Const))
@@ -520,14 +315,14 @@ get_expr(const Node *expr, const List *rtable)
 
 
 static void
-get_restrictclauses(PlannerInfo *root, List *clauses)
+get_restrictclauses(PlannerInfo *root, List *clauses, bool conj)
 {
     ListCell   *l;
 	bool		first = true;
     foreach(l, clauses)
     {
-		if (first)
-			strcat(sub_query, " where ");
+		if (first && conj)
+			strcat(sub_query, "and ");
         RestrictInfo *c = lfirst(l);
         get_expr((Node *) c->clause, root->parse->rtable);
         if (lnext(clauses, l))
@@ -550,9 +345,13 @@ get_relids (PlannerInfo *root, Relids relids){
 			strcat(sub_query, ", ");
         if (x < root->simple_rel_array_size &&
             root->simple_rte_array[x]){
-			strcat(sub_query, get_database_name(MyDatabaseId));
-			strcat(sub_query, ".");
-			strcat(sub_query, root->simple_rte_array[x]->eref->aliasname);
+			if (!query_fmt){
+				strcat(sub_query, get_database_name(MyDatabaseId));
+				strcat(sub_query, ".");
+				strcat(sub_query, root->simple_rte_array[x]->eref->aliasname);
+			}
+			else
+				strcat(sub_query, root->simple_rte_array[x]->eref->aliasname);
 		}
         else
 			strcat(sub_query, "error");
@@ -567,7 +366,8 @@ static void
 get_single_rel (PlannerInfo *root, RelOptInfo *rel) {
 	strcpy(sub_query, "select * from ");
 	get_relids(root, rel->relids);
-	get_restrictclauses(root, rel->baserestrictinfo);
+	strcat(sub_query, " where ");
+	get_restrictclauses(root, rel->baserestrictinfo, false);
 	// get_from_clause(root->parse, "select * from ", sub_query);
 	if(print_single_tbl_queries){
 		printf("%s\n", sub_query);
@@ -575,6 +375,66 @@ get_single_rel (PlannerInfo *root, RelOptInfo *rel) {
 	
 }
 
+static void
+get_path(PlannerInfo *root, Path *path)
+{
+	const char *ptype;
+	bool		join = false;
+	Path	   *subpath = NULL;
+
+	switch (nodeTag(path))
+	{
+		case T_NestPath:
+			ptype = "NestLoop";
+			join = true;
+			break;
+		case T_MergePath:
+			ptype = "MergeJoin";
+			join = true;
+			break;
+		case T_HashPath:
+			ptype = "HashJoin";
+			join = true;
+			break;
+	}
+
+	if (join)
+	{
+		JoinPath   *jp = (JoinPath *) path;
+
+		get_restrictclauses(root, jp->joinrestrictinfo, true);
+
+		get_path(root, jp->outerjoinpath);
+		get_path(root, jp->innerjoinpath);
+	}
+
+}
+
+static void
+get_join_info (PlannerInfo *root, RelOptInfo *rel){
+	if (rel->cheapest_total_path)
+		get_path(root, rel->cheapest_total_path);
+}
+
+
+static void
+get_join_rel (PlannerInfo *root, 
+					RelOptInfo *join_rel,
+					RelOptInfo *outer_rel,
+					RelOptInfo *inner_rel,
+					List *restrictlist_in) {
+	strcpy(sub_query, "select * from ");
+	get_relids(root, join_rel->relids);
+	strcat(sub_query, " where ");
+	get_restrictclauses(root, restrictlist_in, false);
+	get_join_info(root, inner_rel);
+	get_join_info(root, outer_rel);
+	get_restrictclauses(root, inner_rel->baserestrictinfo, true);
+	get_restrictclauses(root, outer_rel->baserestrictinfo, true);
+	if(print_sub_queries){
+		printf("%s\n", sub_query);
+	}
+}
 
 /*
  * clamp_row_est
@@ -5047,13 +4907,15 @@ set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel)
 							   0,
 							   JOIN_INNER,
 							   NULL);
-	
-	if(enable_ml_cardest){
+	if (rel->baserestrictinfo)
+		get_single_rel(root, rel);
+	if(enable_ml_cardest && rel->baserestrictinfo){
 		// http server
         http_tcpclient	t_client;
 		char	*response;
 		int     stt = 0;
 		double  new_nrows;
+
 		printf("Creating socket \n");
 		if ((stt = http_tcpclient_create(&t_client, host, ml_port)) < 0) {
 			printf("Create socket error.\n");
@@ -5081,9 +4943,7 @@ set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel)
 				nrows = new_nrows;
 			}
 		}
-	}
-	if(print_single_tbl_queries){
-        print_single_rel(root, rel);
+		http_tcpclient_close(&t_client);
 	}
 	rel->rows = clamp_row_est(nrows);
 	cost_qual_eval(&rel->baserestrictcost, rel->baserestrictinfo, root);
@@ -5356,13 +5216,43 @@ calc_joinrel_size_estimate(PlannerInfo *root,
 	}
 
 	/*  print for sub-queries*/
-    if (print_sub_queries){
-	    print_join_rel(root, inner_rel, outer_rel);
-    }
+    // if (print_sub_queries){
+	//     print_join_rel(root, inner_rel, outer_rel);
+    // }
 
+	get_join_rel(root, joinrel, inner_rel, outer_rel, restrictlist);
 	if (enable_ml_joinest) {
-		nrows = 100;
-        // http server 
+		// http server
+        http_tcpclient	t_client;
+		char	*response;
+		int     stt = 0;
+		double  new_nrows;
+
+		printf("Creating socket \n");
+		if ((stt = http_tcpclient_create(&t_client, host, ml_port)) < 0) {
+			printf("Create socket error.\n");
+		}
+		if ((stt = http_tcpclient_conn(&t_client)) < 0) {
+			printf("Connect srv error.\n");
+		}
+		if (stt == 0){
+			printf("Connect success.\n");
+			get_join_rel(root, joinrel, inner_rel, outer_rel, restrictlist);
+			if (http_post(&t_client, page, sub_query, &response)) {
+				printf("POST ERROR!\n");
+			}
+			else{
+				// printf("POST Response:\n%d:%s\n",strlen(response),response);
+				cJSON* cjson_response = NULL;
+				cjson_response = cJSON_Parse(response);
+				cJSON* cjson_rows = cJSON_GetObjectItem(cjson_response, "rows");
+				new_nrows = cjson_rows->valuedouble;
+				cJSON_Delete(cjson_response);
+				printf("%.5f:%.5f\n", nrows, new_nrows);
+				nrows = new_nrows;
+			}
+		}
+		http_tcpclient_close(&t_client);
     }
 
 	return clamp_row_est(nrows);

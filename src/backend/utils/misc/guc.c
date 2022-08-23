@@ -2077,8 +2077,19 @@ static struct config_bool ConfigureNamesBool[] =
              NULL
             },
             &print_sub_queries,
-            false,
+            true,
             NULL, NULL, NULL
+    },
+
+	{
+            {"query_fmt", PGC_USERSET, UNGROUPED,
+             gettext_noop("Enable single-table queries printing."),
+             NULL
+            },
+            &query_fmt,
+            true,
+            NULL, NULL, NULL
+
     },
 
 	/* End-of-list marker */
