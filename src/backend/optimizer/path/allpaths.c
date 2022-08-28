@@ -12,7 +12,7 @@
  *
  *-------------------------------------------------------------------------
  */
-
+// #define OPTIMIZER_DEBUG
 #include "postgres.h"
 
 #include <limits.h>
@@ -4195,6 +4195,10 @@ print_path(PlannerInfo *root, Path *path, int indent)
 		printf(" required_outer (");
 		print_relids(root, path->param_info->ppi_req_outer);
 		printf(")");
+		if (path->param_info->ppi_clauses){
+			printf(" join clauses: ");
+			print_restrictclauses(root, path->param_info->ppi_clauses);
+		}
 	}
 	printf(" rows=%.0f cost=%.2f..%.2f\n",
 		   path->rows, path->startup_cost, path->total_cost);

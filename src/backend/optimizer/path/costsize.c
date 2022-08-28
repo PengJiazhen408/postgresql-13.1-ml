@@ -109,7 +109,6 @@
  */
 #define APPEND_CPU_COST_MULTIPLIER 0.5
 
-
 /** modified  */
 bool		enable_ml_cardest = false;
 bool		enable_ml_joinest = false;
@@ -281,7 +280,7 @@ get_expr(const Node *expr, const List *rtable)
 			strcat(sub_query, " ");
             // printf(" %s ", ((opname != NULL) ? opname : "(invalid operator)"));
             get_expr(get_rightop((const Expr *) e), rtable);
-			strcat(sub_query, " ");
+			
 		}
         else
         {
@@ -290,7 +289,6 @@ get_expr(const Node *expr, const List *rtable)
 			strcat(sub_query, opname);
 			strcat(sub_query, " ");
             get_expr(get_leftop((const Expr *) e), rtable);
-			strcat(sub_query, " ");
         }
     }
     else if (IsA(expr, FuncExpr))
@@ -322,11 +320,11 @@ get_restrictclauses(PlannerInfo *root, List *clauses, bool conj)
     foreach(l, clauses)
     {
 		if (first && conj)
-			strcat(sub_query, "and ");
+			strcat(sub_query, " and ");
         RestrictInfo *c = lfirst(l);
         get_expr((Node *) c->clause, root->parse->rtable);
         if (lnext(clauses, l))
-            strcat(sub_query, "and ");
+            strcat(sub_query, " and ");
 		first = false;
     }
 }
@@ -348,10 +346,21 @@ get_relids (PlannerInfo *root, Relids relids){
 			if (!query_fmt){
 				strcat(sub_query, get_database_name(MyDatabaseId));
 				strcat(sub_query, ".");
-				strcat(sub_query, root->simple_rte_array[x]->eref->aliasname);
+				strcat(sub_query, get_rel_name(root->simple_rte_array[x]->relid));
 			}
-			else
-				strcat(sub_query, root->simple_rte_array[x]->eref->aliasname);
+			else{
+				char *rname = get_rel_name(root->simple_rte_array[x]->relid);
+				char *alias = root->simple_rte_array[x]->eref->aliasname;
+				if (strcmp(rname, alias)==0)
+					strcat(sub_query, rname);
+				else{
+					strcat(sub_query, rname);
+					strcat(sub_query, " ");
+					strcat(sub_query, alias);
+				}
+			}
+				
+				
 		}
         else
 			strcat(sub_query, "error");
@@ -359,42 +368,46 @@ get_relids (PlannerInfo *root, Relids relids){
     }
 	
 	// strcat(sub_query, res);
-	strcat(sub_query, "\0");
 }
 
 static void
 get_single_rel (PlannerInfo *root, RelOptInfo *rel) {
-	strcpy(sub_query, "select * from ");
+	if (query_fmt)
+		strcpy(sub_query, "select count(*) from ");
+	else
+		strcpy(sub_query, "select * from ");
 	get_relids(root, rel->relids);
 	strcat(sub_query, " where ");
 	get_restrictclauses(root, rel->baserestrictinfo, false);
-	// get_from_clause(root->parse, "select * from ", sub_query);
+	if (query_fmt)
+		strcat(sub_query, ";");
+	strcat(sub_query, "\0");
 	if(print_single_tbl_queries){
 		printf("%s\n", sub_query);
 	}
-	
 }
 
 static void
 get_path(PlannerInfo *root, Path *path)
 {
-	const char *ptype;
 	bool		join = false;
 	Path	   *subpath = NULL;
-
 	switch (nodeTag(path))
 	{
 		case T_NestPath:
-			ptype = "NestLoop";
 			join = true;
 			break;
 		case T_MergePath:
-			ptype = "MergeJoin";
 			join = true;
 			break;
 		case T_HashPath:
-			ptype = "HashJoin";
 			join = true;
+			break;
+		case T_GatherPath:
+			subpath = ((GatherPath *) path)->subpath;
+			break;
+		case T_GatherMergePath:
+			subpath = ((GatherMergePath *) path)->subpath;
 			break;
 	}
 
@@ -402,12 +415,18 @@ get_path(PlannerInfo *root, Path *path)
 	{
 		JoinPath   *jp = (JoinPath *) path;
 
-		get_restrictclauses(root, jp->joinrestrictinfo, true);
-
+		if (jp->joinrestrictinfo){
+			get_restrictclauses(root, jp->joinrestrictinfo, true);
+		}
+		else if (jp->innerjoinpath->param_info->ppi_clauses){
+			get_restrictclauses(root, jp->innerjoinpath->param_info->ppi_clauses, true);
+		}
+	
 		get_path(root, jp->outerjoinpath);
 		get_path(root, jp->innerjoinpath);
 	}
-
+	if (subpath)
+		get_path(root, subpath);
 }
 
 static void
@@ -416,6 +435,24 @@ get_join_info (PlannerInfo *root, RelOptInfo *rel){
 		get_path(root, rel->cheapest_total_path);
 }
 
+static void 
+get_base_restrictclauses (PlannerInfo *root, Relids relids){
+	int			x;
+	// char	    *rname;
+    x = -1;
+    while ((x = bms_next_member(relids, x)) >= 0)
+    {
+        if (x < root->simple_rel_array_size &&
+            root->simple_rel_array[x]){
+			get_restrictclauses(root, root->simple_rel_array[x]->baserestrictinfo, true);
+		}
+        else
+			strcat(sub_query, "error");
+    }
+	
+	// strcat(sub_query, res);
+	
+}
 
 static void
 get_join_rel (PlannerInfo *root, 
@@ -423,17 +460,19 @@ get_join_rel (PlannerInfo *root,
 					RelOptInfo *outer_rel,
 					RelOptInfo *inner_rel,
 					List *restrictlist_in) {
-	strcpy(sub_query, "select * from ");
+	strcpy(sub_query, "select count(*) from ");
 	get_relids(root, join_rel->relids);
 	strcat(sub_query, " where ");
 	get_restrictclauses(root, restrictlist_in, false);
 	get_join_info(root, inner_rel);
 	get_join_info(root, outer_rel);
-	get_restrictclauses(root, inner_rel->baserestrictinfo, true);
-	get_restrictclauses(root, outer_rel->baserestrictinfo, true);
+	get_base_restrictclauses(root, join_rel->relids);
+	strcat(sub_query, ";");
+	strcat(sub_query, "\0");
 	if(print_sub_queries){
 		printf("%s\n", sub_query);
 	}
+
 }
 
 /*
