@@ -3,7 +3,7 @@ Integration of CardEst Methods into PostgreSQL by HTTP Server
 
 
 ## Compare with PG CE methods
-### Single Tabel
+### Single Table
 - test database: imdb.title
 - Plan with PG CE methods:
 
@@ -37,7 +37,7 @@ imdb=# explain analyze select * from title where kind_id>1 and kind_id<10;
 (5 rows)
 ```
 
-### Multi-Tabel Join
+### Multi-Table Join
 - test database: imdb
 - Plan with PG CE methods:
 
